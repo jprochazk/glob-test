@@ -1,0 +1,15 @@
+[package]
+name = "glob_test"
+version = "1.0.0"
+edition = "2024"
+publish = true
+
+[lib]
+proc-macro = true
+
+[dependencies]
+glob = "0.3.3"
+proc-macro2 = { version = "1.0.95", features = ["span-locations"] }
+
+[dev-dependencies]
+insta = "1.43.1"
