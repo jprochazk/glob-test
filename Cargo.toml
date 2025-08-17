@@ -1,8 +1,12 @@
 [package]
 name = "glob_test"
-version = "1.0.0"
+version = "0.1.0"
 edition = "2024"
+repository = "https://github.com/jprochazk/glob-test"
+license = "MIT OR Apache-2.0"
+description = "Generate tests from a glob pattern"
 publish = true
+rust-version = "1.88"
 
 [lib]
 proc-macro = true

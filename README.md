@@ -52,7 +52,7 @@ mod usage {
 - The proc macro doesn't use `syn` or `quote`, instead parsing from `proc_macro2` tokens.
 - Globbing is powered by [`glob`](https://crates.io/crates/glob).
 
-This library was specifically developed for use with [`insta`](https://insta.rs) in mind:
+This library was specifically developed with [`insta`](https://insta.rs) in mind:
 
 ```rust
 #[glob_test::glob("./**/*.txt")]
@@ -61,25 +61,21 @@ fn snapshots(path: &Path) {
 }
 ```
 
-It is recommended that you put a `build.rs` file in any crate which uses this library.
-An empty `main` will do:
+Each file will produce one snapshot, just like `insta::glob!`. The primary difference is that now each snapshot
+also gets its own unique _test function_, which means:
+- All snapshot tests can run in parallel.
+- Tests continue on error: A panic in one snapshot test doesn't cause all other tests in the same `glob!` to stop.
+
+It is recommended that you put a `build.rs` file in any crate which uses this library:
 
 ```rust
 // build.rs
-fn main() {}
-```
-
-That ensures changes to test files are reflected in the test binary.
-
-You can scope Cargo's file change checks using `rerun-if-changed`:
-
-```rust
-// build.rs
-
 fn main() {
     println!("cargo:rerun-if-changed=tests/usage/inputs")
 }
 ```
+
+That ensures changes to test files are always reflected in the test binary.
 
 ### License
 
