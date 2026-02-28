@@ -60,7 +60,6 @@ fn try_glob(attr: TokenStream, item: TokenStream) -> Result<TokenStream> {
     let paths = glob::glob(resolved_path).map_err(stringify)?;
     for path in paths {
         let path = path.map_err(stringify)?;
-        assert!(path.is_file(), "{} is not a file", path.display());
 
         let _ = path.strip_prefix(&traverse_root).map_err(|_| {
             error(
@@ -78,27 +77,9 @@ fn try_glob(attr: TokenStream, item: TokenStream) -> Result<TokenStream> {
     // usage/b.txt -> mod usage { #[test] fn b() {} }
     // usage/nested/c.txt -> mod usage { mod nested { #[test] fn c() {} } }
 
-    let glob_handler = {
-        let tokens = item.clone().into_iter().collect::<Vec<_>>();
+    let test_handler = parse_fn(item.clone())?;
 
-        // find last brace group
-        let body = tokens
-            .iter()
-            .find(|tt| {
-                if let TokenTree::Group(g) = tt
-                    && g.delimiter() == Delimiter::Brace
-                {
-                    true
-                } else {
-                    false
-                }
-            })
-            .unwrap();
-
-        body.to_string()
-    };
-
-    traverse(&mut output, &tree.root.children, &glob_handler);
+    traverse(&mut output, &tree.root.children, &test_handler);
 
     let mut tests = TokenStream::new();
     tests.extend(TokenStream::from_str("#[allow(dead_code)]").unwrap());
@@ -113,7 +94,11 @@ fn try_glob(attr: TokenStream, item: TokenStream) -> Result<TokenStream> {
     Ok(tests)
 }
 
-fn traverse(output: &mut String, children: &BTreeMap<PathBuf, TreeNode>, glob_handler: &str) {
+fn traverse(
+    output: &mut String,
+    children: &BTreeMap<PathBuf, TreeNode>,
+    test_handler: &TestHandler,
+) {
     for (dir, node) in children.iter() {
         if let Some(module_name) = dir.file_name() {
             let module_name = normalize(module_name);
@@ -125,10 +110,10 @@ fn traverse(output: &mut String, children: &BTreeMap<PathBuf, TreeNode>, glob_ha
         }
 
         for file in &node.paths {
-            generate_test(output, file, glob_handler);
+            generate_test(output, file, test_handler);
         }
 
-        traverse(output, &node.children, glob_handler);
+        traverse(output, &node.children, test_handler);
 
         if let Some(_) = dir.file_name() {
             writeln!(output, "}}").unwrap();
@@ -136,16 +121,18 @@ fn traverse(output: &mut String, children: &BTreeMap<PathBuf, TreeNode>, glob_ha
     }
 }
 
-fn generate_test(output: &mut String, path: &Path, glob_handler: &str) {
+fn generate_test(output: &mut String, path: &Path, test_handler: &TestHandler) {
     let test_name = normalize(path.file_stem().unwrap());
     let path = path.display().to_string();
+    let param_name = &test_handler.param_name;
+    let body = &test_handler.body;
 
     writeln!(
         output,
         "#[test]
         fn {test_name}() {{
-            (|path: &::std::path::Path| {glob_handler})
-            (::std::path::Path::new({path:?}));   
+            (|{param_name}: &::std::path::Path| {body})
+            (::std::path::Path::new({path:?}));
         }}"
     )
     .unwrap();
@@ -156,6 +143,123 @@ fn normalize(s: &OsStr) -> String {
         .chars()
         .map(|c| if c.is_ascii() { c } else { '_' })
         .collect()
+}
+
+struct TestHandler {
+    param_name: String,
+    body: String,
+}
+
+/// Parses `fn <ident>(<ident> <anything>) <anything> { <body> }`.
+fn parse_fn(tokens: TokenStream) -> Result<TestHandler> {
+    let mut tokens = tokens.into_iter();
+
+    let fn_keyword = skip_attributes(&mut tokens)?;
+
+    match &fn_keyword {
+        TokenTree::Ident(ident) if ident.to_string() == "fn" => {}
+        TokenTree::Ident(ident)
+            if matches!(
+                ident.to_string().as_str(),
+                "const" | "async" | "unsafe" | "extern" | "pub"
+            ) =>
+        {
+            return Err(error(
+                format!("`{}` functions are not supported", ident),
+                ident.span(),
+            ));
+        }
+        _ => return Err(error("expected `fn`".into(), fn_keyword.span())),
+    }
+
+    // function name
+    let _fn_name = expect_ident(&mut tokens, "function name")?;
+
+    // generics are not supported, so parameters must come next
+    let params_group = expect_params(&mut tokens)?;
+
+    // first token in the parameter list must be an identifier
+    let mut param_tokens = params_group.stream().into_iter();
+    let param_tt = param_tokens
+        .next()
+        .ok_or_else(|| error("expected parameter name".into(), params_group.span()))?;
+    let param_name = match param_tt {
+        TokenTree::Ident(ident) => ident.to_string(),
+        // if it's not an identifier, it must be a pattern, which we don't support:
+        _ => {
+            return Err(error(
+                "expected parameter name, not a pattern".into(),
+                param_tt.span(),
+            ));
+        }
+    };
+
+    // find body (skip return type, where clause, etc.)
+    let body = find_body(&mut tokens)?;
+
+    Ok(TestHandler {
+        param_name,
+        body: body.to_string(),
+    })
+}
+
+/// Skips `#[...]` attributes, returning the first non-attribute token.
+fn skip_attributes(tokens: &mut TokenStreamIter) -> Result<TokenTree> {
+    loop {
+        let tt = tokens
+            .next()
+            .ok_or_else(|| error("expected `fn`".into(), Span::call_site()))?;
+        if let TokenTree::Punct(p) = &tt
+            && p.as_char() == '#'
+        {
+            let bracket = tokens
+                .next()
+                .ok_or_else(|| error("expected `[`".into(), p.span()))?;
+            match &bracket {
+                TokenTree::Group(g) if g.delimiter() == Delimiter::Bracket => continue,
+                _ => return Err(error("expected `[`".into(), bracket.span())),
+            }
+        }
+        return Ok(tt);
+    }
+}
+
+fn expect_ident(tokens: &mut TokenStreamIter, expected: &str) -> Result<proc_macro2::Ident> {
+    let tt = tokens
+        .next()
+        .ok_or_else(|| error(format!("expected {expected}"), Span::call_site()))?;
+    match tt {
+        TokenTree::Ident(ident) => Ok(ident),
+        _ => Err(error(format!("expected {expected}"), tt.span())),
+    }
+}
+
+/// `(...)`
+fn expect_params(tokens: &mut TokenStreamIter) -> Result<proc_macro2::Group> {
+    let tt = tokens
+        .next()
+        .ok_or_else(|| error("expected `(`".into(), Span::call_site()))?;
+    match tt {
+        TokenTree::Group(g) if g.delimiter() == Delimiter::Parenthesis => Ok(g),
+        TokenTree::Punct(p) if p.as_char() == '<' => Err(error(
+            "generic functions are not supported".into(),
+            p.span(),
+        )),
+        _ => Err(error("expected `(`".into(), tt.span())),
+    }
+}
+
+/// Finds the last `{ ... }` group in the remaining tokens, which is the function body.
+fn find_body(tokens: &mut TokenStreamIter) -> Result<proc_macro2::Group> {
+    let mut body = None;
+    for tt in tokens {
+        if let TokenTree::Group(g) = tt
+            && g.delimiter() == Delimiter::Brace
+        {
+            body = Some(g);
+        }
+    }
+    body.ok_or_else(|| error("expected function body".into(), Span::call_site()))
 }
 
 #[derive(Debug)]

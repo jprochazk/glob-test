@@ -1,0 +1,9 @@
+error: expected parameter name, not a pattern
+ --> tests/ui/fail_pattern.rs:4:9
+  |
+3 | #[glob_test::glob("../usage/inputs/**/*.txt")]
+  | ---------------------------------------------- in this attribute macro expansion
+4 | fn test((path, _): (&Path, i32)) {
+  |         ^^^^^^^^^
+  |
+  = note: this error originates in the attribute macro `glob_test::glob` (in Nightly builds, run with -Z macro-backtrace for more info)

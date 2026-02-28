@@ -17,3 +17,4 @@ proc-macro2 = { version = "1.0.95", features = ["span-locations"] }
 
 [dev-dependencies]
 insta = "1.43.1"
+trybuild = "1"

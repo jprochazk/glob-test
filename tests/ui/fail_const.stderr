@@ -1,0 +1,9 @@
+error: `const` functions are not supported
+ --> tests/ui/fail_const.rs:4:1
+  |
+3 | #[glob_test::glob("../usage/inputs/**/*.txt")]
+  | ---------------------------------------------- in this attribute macro expansion
+4 | const fn test(path: &Path) {
+  | ^^^^^
+  |
+  = note: this error originates in the attribute macro `glob_test::glob` (in Nightly builds, run with -Z macro-backtrace for more info)
