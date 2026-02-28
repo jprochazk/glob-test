@@ -1,0 +1,9 @@
+error: generic functions are not supported
+ --> tests/ui/fail_generic.rs:4:8
+  |
+3 | #[glob_test::glob("../usage/inputs/**/*.txt")]
+  | ---------------------------------------------- in this attribute macro expansion
+4 | fn test<T>(path: &Path) {
+  |        ^
+  |
+  = note: this error originates in the attribute macro `glob_test::glob` (in Nightly builds, run with -Z macro-backtrace for more info)
